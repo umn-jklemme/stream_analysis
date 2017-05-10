@@ -1,0 +1,969 @@
+...
+https://en.wikipedia.org/wiki/YCbCr
+
+Need LibFreeImage for original CPU compilation -> http://freeimage.sourceforge.net/download.html
+
+GPU compilation is agnostic of LibFreeImage, but will need GIMP in order to load input and output files for viewing
+
+
+
+Baseline
+-=-=-=-===================================================================
+
+./image-analysis-gpu -i input_bmp/X-Rite-Photo.bmp  -o output.bmp
+
+Set up...0.413034 s
+
+Finding boxes...0.227303 s
+
+ Row len 6, Column len 4
+
+Sorting/placing boxes...0.000002 s
+
+Calculating correctness and printing colors...0.002734 s
+
+RGB 115 82 68 looks like 111.0 74.0 66.0 for dark_skin
+    RGB percent 96.5 90.2 97.1
+RGB 194 150 130 looks like 186.0 148.0 146.0 for light_skin
+    RGB percent 95.9 98.7 112.3
+RGB 98 122 157 looks like 119.0 132.0 171.0 for blue_sky
+    RGB percent 121.4 108.2 108.9
+RGB 87 108 67 looks like 93.0 109.0 74.0 for foliage
+    RGB percent 106.9 100.9 110.4
+RGB 133 128 177 looks like 149.0 138.0 182.0 for blue_flower
+    RGB percent 112.0 107.8 102.8
+RGB 103 189 170 looks like 129.0 188.0 186.0 for bluish_green
+    RGB percent 125.2 99.5 109.4
+RGB 214 126 44 looks like 184.0 107.0 62.0 for orange
+    RGB percent 86.0 84.9 140.9
+RGB 80 91 166 looks like 85.0 94.0 182.0 for purplish_blue
+    RGB percent 106.2 103.3 109.6
+RGB 193 90 99 looks like 190.0 97.0 112.0 for moderate_red
+    RGB percent 98.4 107.8 113.1
+RGB 94 60 108 looks like 89.0 59.0 97.0 for purple
+    RGB percent 94.7 98.3 89.8
+RGB 157 188 64 looks like 147.0 178.0 93.0 for yellow_green
+    RGB percent 93.6 94.7 145.3
+RGB 224 163 46 looks like 194.0 149.0 87.0 for orange_yellow
+    RGB percent 86.6 91.4 189.1
+RGB 56 61 150 looks like 49.0 64.0 158.0 for blue
+    RGB percent 87.5 104.9 105.3
+RGB 70 148 73 looks like 62.0 134.0 75.0 for green
+    RGB percent 88.6 90.5 102.7
+RGB 175 54 60 looks like 166.0 50.0 59.0 for red
+    RGB percent 94.9 92.6 98.3
+RGB 231 199 31 looks like 188.0 169.0 74.0 for yellow
+    RGB percent 81.4 84.9 238.7
+RGB 187 86 149 looks like 188.0 91.0 144.0 for magenta
+    RGB percent 100.5 105.8 96.6
+RGB 8 133 161 looks like 87.0 152.0 190.0 for cyan
+    RGB percent 1087.5 114.3 118.0
+RGB 243 243 243 looks like 188.0 185.0 188.0 for white
+    RGB percent 77.4 76.1 77.4
+RGB 200 200 200 looks like 166.0 163.0 168.0 for neutral_8
+    RGB percent 83.0 81.5 84.0
+RGB 160 160 160 looks like 140.0 136.0 142.0 for neutral_6_5
+    RGB percent 87.5 85.0 88.8
+RGB 122 122 122 looks like 104.0 100.0 106.0 for neutral_5
+    RGB percent 85.2 82.0 86.9
+RGB 85 85 82 looks like 68.0 67.0 70.0 for neutral_3_5
+    RGB percent 80.0 78.8 85.4
+RGB 52 52 52 looks like 39.0 38.0 38.0 for black
+    RGB percent 75.0 73.1 73.1
+
+Overall:
+RED 95.12 %
+GREEN 92.83 %
+BLUE 103.27 %
+
+
+-=-=====================================================================
+
+Setup time can be reduced by parallelizing file I/O, of which I am unfamiliar with.
+This only organizes the pixels into memory the way we want and is supposed to
+represent getting the input to arrive at a consistent state. In other words, if
+we had a stream input, we could collect the incoming stream to the most up to date
+(shown) pixels presented in the same format.
+
+Finding the boxes is an expensive operation at almost a quarter of a second.
+This is the main problem since it is desired to have this operation run at 60 times
+a second, which would require a time less than 0.016 seconds, which would require
+roughly a 14x speedup or better.
+
+Calculating correctness is a smaller operation, but it takes about 3 milliseconds.
+
+-=-=-=-=
+
+Trying to copy over changes halfway is expensive:
+
+Copying memory to GPU...0.144478 s
+
+So try just doing pixels instead, we need them on the device anyway....
+
+-=-=-=-=
+
+
+Copying memory to GPU...0.110489 s
+
+Launching correctness calculations on GPU...0.000458 s
+
+Copying data from device to host...0.001063 s
+
+---> This allows for some limited speedup which is nice. We need to copy the pixels to the device anyway, so I'm not mad.
+
+If we only use the pixel threads needed for a single box...
+    Launching correctness calculations on GPU...0.000099 s
+We get more speedup.
+
+
+-=-------------------------=======================-----------------------
+
+We can convert the memory to YCBCR
+
+Running on CPU....
+
+Set up...0.398623 s
+
+Converting memory on CPU...0.061899 s
+
+Finding boxes on CPU...0.041646 s
+
+ Row len 6, Column len 4
+
+Sorting/placing boxes...0.000002 s
+
+Calculating correctness and printing colors on CPU...0.002951 s
+
+RGB 115 82 68 looks like 111.0 74.0 66.0 for dark_skin
+    RGB percent 96.5 90.2 97.1
+RGB 194 150 130 looks like 186.0 148.0 146.0 for light_skin
+    RGB percent 95.9 98.7 112.3
+RGB 98 122 157 looks like 119.0 132.0 171.0 for blue_sky
+    RGB percent 121.4 108.2 108.9
+RGB 87 108 67 looks like 93.0 109.0 74.0 for foliage
+    RGB percent 106.9 100.9 110.4
+RGB 133 128 177 looks like 149.0 138.0 182.0 for blue_flower
+    RGB percent 112.0 107.8 102.8
+RGB 103 189 170 looks like 129.0 188.0 186.0 for bluish_green
+    RGB percent 125.2 99.5 109.4
+RGB 214 126 44 looks like 184.0 107.0 62.0 for orange
+    RGB percent 86.0 84.9 140.9
+RGB 80 91 166 looks like 85.0 94.0 182.0 for purplish_blue
+    RGB percent 106.2 103.3 109.6
+RGB 193 90 99 looks like 190.0 97.0 112.0 for moderate_red
+    RGB percent 98.4 107.8 113.1
+RGB 94 60 108 looks like 89.0 59.0 97.0 for purple
+    RGB percent 94.7 98.3 89.8
+RGB 157 188 64 looks like 147.0 178.0 93.0 for yellow_green
+    RGB percent 93.6 94.7 145.3
+RGB 224 163 46 looks like 194.0 149.0 87.0 for orange_yellow
+    RGB percent 86.6 91.4 189.1
+RGB 56 61 150 looks like 49.0 64.0 158.0 for blue
+    RGB percent 87.5 104.9 105.3
+RGB 70 148 73 looks like 62.0 134.0 75.0 for green
+    RGB percent 88.6 90.5 102.7
+RGB 175 54 60 looks like 166.0 50.0 59.0 for red
+    RGB percent 94.9 92.6 98.3
+RGB 231 199 31 looks like 188.0 169.0 74.0 for yellow
+    RGB percent 81.4 84.9 238.7
+RGB 187 86 149 looks like 188.0 91.0 144.0 for magenta
+    RGB percent 100.5 105.8 96.6
+RGB 8 133 161 looks like 87.0 152.0 190.0 for cyan
+    RGB percent 1087.5 114.3 118.0
+RGB 243 243 243 looks like 188.0 185.0 188.0 for white
+    RGB percent 77.4 76.1 77.4
+RGB 200 200 200 looks like 166.0 163.0 168.0 for neutral_8
+    RGB percent 83.0 81.5 84.0
+RGB 160 160 160 looks like 140.0 136.0 142.0 for neutral_6_5
+    RGB percent 87.5 85.0 88.8
+RGB 122 122 122 looks like 104.0 100.0 106.0 for neutral_5
+    RGB percent 85.2 82.0 86.9
+RGB 85 85 82 looks like 68.0 67.0 70.0 for neutral_3_5
+    RGB percent 80.0 78.8 85.4
+RGB 52 52 52 looks like 39.0 38.0 38.0 for black
+    RGB percent 75.0 73.1 73.1
+
+Overall:
+RED 95.12 %
+GREEN 92.83 %
+BLUE 103.27 %
+
+
+
+-=-=-==-=--=-===============================================================
+
+
+--- > This costs 0.061899 s conversion and results in 0.041646 s on CPU
+--- > This is down to .1035 s from 0.227303 s --> already doubled the speedup!
+
+
+-----
+
+Set up...0.380335 s
+
+Copying memory to GPU...0.103197 s
+
+Running GPU conversion method...0.002126 s
+
+Finding boxes on CPU...0.041610 s
+
+ Row len 6, Column len 4
+
+Sorting/placing boxes...0.000002 s
+
+Calculating correctness and printing colors on CPU...0.002761 s
+
+RGB 115 82 68 looks like 111.0 74.0 66.0 for dark_skin
+    RGB percent 96.5 90.2 97.1
+RGB 194 150 130 looks like 186.0 148.0 146.0 for light_skin
+    RGB percent 95.9 98.7 112.3
+RGB 98 122 157 looks like 119.0 132.0 171.0 for blue_sky
+    RGB percent 121.4 108.2 108.9
+RGB 87 108 67 looks like 93.0 109.0 74.0 for foliage
+    RGB percent 106.9 100.9 110.4
+RGB 133 128 177 looks like 149.0 138.0 182.0 for blue_flower
+    RGB percent 112.0 107.8 102.8
+RGB 103 189 170 looks like 129.0 188.0 186.0 for bluish_green
+    RGB percent 125.2 99.5 109.4
+RGB 214 126 44 looks like 184.0 107.0 62.0 for orange
+    RGB percent 86.0 84.9 140.9
+RGB 80 91 166 looks like 85.0 94.0 182.0 for purplish_blue
+    RGB percent 106.2 103.3 109.6
+RGB 193 90 99 looks like 190.0 97.0 112.0 for moderate_red
+    RGB percent 98.4 107.8 113.1
+RGB 94 60 108 looks like 89.0 59.0 97.0 for purple
+    RGB percent 94.7 98.3 89.8
+RGB 157 188 64 looks like 147.0 178.0 93.0 for yellow_green
+    RGB percent 93.6 94.7 145.3
+RGB 224 163 46 looks like 194.0 149.0 87.0 for orange_yellow
+    RGB percent 86.6 91.4 189.1
+RGB 56 61 150 looks like 49.0 64.0 158.0 for blue
+    RGB percent 87.5 104.9 105.3
+RGB 70 148 73 looks like 62.0 134.0 75.0 for green
+    RGB percent 88.6 90.5 102.7
+RGB 175 54 60 looks like 166.0 50.0 59.0 for red
+    RGB percent 94.9 92.6 98.3
+RGB 231 199 31 looks like 188.0 169.0 74.0 for yellow
+    RGB percent 81.4 84.9 238.7
+RGB 187 86 149 looks like 188.0 91.0 144.0 for magenta
+    RGB percent 100.5 105.8 96.6
+RGB 8 133 161 looks like 87.0 152.0 190.0 for cyan
+    RGB percent 1087.5 114.3 118.0
+RGB 243 243 243 looks like 188.0 185.0 188.0 for white
+    RGB percent 77.4 76.1 77.4
+RGB 200 200 200 looks like 166.0 163.0 168.0 for neutral_8
+    RGB percent 83.0 81.5 84.0
+RGB 160 160 160 looks like 140.0 136.0 142.0 for neutral_6_5
+    RGB percent 87.5 85.0 88.8
+RGB 122 122 122 looks like 104.0 100.0 106.0 for neutral_5
+    RGB percent 85.2 82.0 86.9
+RGB 85 85 82 looks like 68.0 67.0 70.0 for neutral_3_5
+    RGB percent 80.0 78.8 85.4
+RGB 52 52 52 looks like 39.0 38.0 38.0 for black
+    RGB percent 75.0 73.1 73.1
+
+Overall:
+RED 95.12 %
+GREEN 92.83 %
+BLUE 103.27 %
+
+
+--------------------------------------------------------------==========================
+
+Running this on GPU and back we have ..0.002126 s and 0.061 on host so
+since GPU is 28x faster, we'll be doing that.
+
+
+
+-------------------------------------------------------------
+
+Added voting
+
+/X-Rite-Photo.bmp -o output.bmp
+
+Set up...0.409130 s
+
+Copying memory to GPU...0.113063 s
+
+Running GPU conversion method...0.000515 s
+
+Running GPU boxing method...0.016158 s
+
+Copying data from device to host...0.001351 s
+
+---------------------------------------------------
+
+Vote smoothing (with tiling)
+
+/X-Rite-Photo.bmp -o output.bmp
+
+Set up...0.423336 s
+
+Copying memory to GPU...0.113135 s
+
+Running GPU conversion method...0.000518 s
+
+Running GPU boxing method...0.016208 s
+
+Copying data from device to host...0.001419 s
+
+----------------------------------------------
+
+Boxing and stuff (colors buggy)
+
+Set up...0.415280 s
+
+Copying memory to GPU...0.086047 s
+
+Running GPU conversion method...0.000534 s
+
+Running GPU boxing method...0.015802 s
+
+ Copying votes back to host...0.000044 s
+
+ Determining boxes with CPU...0.005282 s
+
+ Loading GPU color values into host...0.000011 s
+
+ Row len 5, Column len 5
+
+Sorting/placing boxes...0.000002 s
+
+Launching correctness calculations on GPU...0.000092 s
+
+Copying data from device to host...0.001071 s
+
+RGB 115 82 68 looks like 111.6 260.4 334.8 for dark_skin
+    RGB percent 97.1 317.6 492.4
+RGB 194 150 130 looks like 260.4 334.8 372.9 for light_skin
+    RGB percent 134.2 223.2 286.9
+RGB 98 122 157 looks like 334.8 372.9 430.1 for blue_sky
+    RGB percent 341.7 305.7 274.0
+RGB 87 108 67 looks like 372.9 430.1 341.7 for foliage
+    RGB percent 428.7 398.3 510.0
+RGB 133 128 177 looks like 430.1 341.7 371.2 for blue_flower
+    RGB percent 323.4 267.0 209.7
+RGB 103 189 170 looks like 341.7 371.2 186.1 for bluish_green
+    RGB percent 331.8 196.4 109.5
+RGB 214 126 44 looks like 184.3 192.9 346.8 for orange
+    RGB percent 86.1 153.1 788.1
+RGB 80 91 166 looks like 192.9 346.8 372.2 for purplish_blue
+    RGB percent 241.2 381.0 224.2
+RGB 193 90 99 looks like 346.8 372.2 319.3 for moderate_red
+    RGB percent 179.7 413.6 322.5
+RGB 94 60 108 looks like 372.2 319.3 474.1 for purple
+    RGB percent 396.0 532.2 439.0
+RGB 157 188 64 looks like 319.3 474.1 243.3 for yellow_green
+    RGB percent 203.4 252.2 380.2
+RGB 224 163 46 looks like 474.1 243.3 87.2 for orange_yellow
+    RGB percent 211.7 149.3 189.7
+RGB 56 61 150 looks like 49.1 126.3 480.8 for blue
+    RGB percent 87.7 207.1 320.5
+RGB 70 148 73 looks like 126.3 480.8 432.3 for green
+    RGB percent 180.5 324.8 592.2
+RGB 175 54 60 looks like 331.8 280.9 210.2 for red
+    RGB percent 189.6 520.2 350.3
+RGB 231 199 31 looks like 480.8 432.3 331.8 for yellow
+    RGB percent 208.1 217.2 1070.2
+RGB 187 86 149 looks like 432.3 331.8 280.9 for magenta
+    RGB percent 231.2 385.8 188.5
+RGB 8 133 161 looks like 280.9 210.2 188.6 for cyan
+    RGB percent 3511.1 158.0 117.1
+RGB 243 243 243 looks like 188.0 349.8 489.5 for white
+    RGB percent 77.4 144.0 201.4
+RGB 200 200 200 looks like 349.8 489.5 407.3 for neutral_8
+    RGB percent 174.9 244.8 203.6
+RGB 160 160 160 looks like 489.5 407.3 310.0 for neutral_6_5
+    RGB percent 305.9 254.6 193.7
+RGB 122 122 122 looks like 407.3 310.0 211.5 for neutral_5
+    RGB percent 333.8 254.1 173.4
+RGB 85 85 82 looks like 310.0 211.5 108.6 for neutral_3_5
+    RGB percent 364.7 248.9 132.5
+RGB 52 52 52 looks like 211.5 108.6 37.3 for black
+    RGB percent 406.8 208.9 71.7
+
+Overall:
+RED 225.50 %
+GREEN 256.54 %
+BLUE 265.15 %
+
+-------------------------------------------------------------
+
+Running GPU boxing method...0.015802 s
+
+ Copying votes back to host...0.000044 s
+
+ Determining boxes with CPU...0.005282 s
+
+
+ vs Finding boxes...0.227303 s or even 0.041646 s
+
+ means we have a time of just over .02 seconds which doubles the speedup, and is over 10x faster than the original
+
+
+ -=======================------------------------==-=-=-=-=-=-=
+
+-=-=-= Running it successfullly for the first time...
+
+-=-=-=============
+
+
+hoto.bmp -o output.bmp
+
+Set up...0.388380 s
+
+Copying memory to GPU...0.114888 s
+
+Running GPU conversion method...0.000516 s
+
+Running GPU boxing method...0.016326 s
+
+ Copying votes back to host...0.000032 s
+
+ Determining boxes with CPU...0.000204 s
+
+ Loading GPU color values into host...0.000011 s
+
+ Row len 5, Column len 5
+
+Sorting/placing boxes...0.000002 s
+
+Launching correctness calculations on GPU...0.000115 s
+
+Copying data from device to host...0.001065 s
+
+RGB 115 82 68 looks like 111.6 74.2 66.5 for dark_skin
+    RGB percent 97.1 90.5 97.8
+RGB 194 150 130 looks like 186.2 148.7 146.1 for light_skin
+    RGB percent 96.0 99.1 112.4
+RGB 98 122 157 looks like 119.7 132.9 171.7 for blue_sky
+    RGB percent 122.1 108.9 109.4
+RGB 87 108 67 looks like 93.8 109.5 74.1 for foliage
+    RGB percent 107.8 101.4 110.6
+RGB 133 128 177 looks like 148.9 138.1 182.5 for blue_flower
+    RGB percent 111.9 107.9 103.1
+RGB 103 189 170 looks like 129.6 188.7 186.1 for bluish_green
+    RGB percent 125.8 99.9 109.5
+RGB 214 126 44 looks like 184.3 107.8 62.6 for orange
+    RGB percent 86.1 85.5 142.2
+RGB 80 91 166 looks like 85.2 94.1 182.2 for purplish_blue
+    RGB percent 106.4 103.4 109.8
+RGB 193 90 99 looks like 190.1 97.4 112.7 for moderate_red
+    RGB percent 98.5 108.2 113.8
+RGB 94 60 108 looks like 92.6 59.4 101.3 for purple
+    RGB percent 98.5 99.0 93.8
+RGB 157 188 64 looks like 147.2 178.7 93.7 for yellow_green
+    RGB percent 93.8 95.0 146.4
+RGB 224 163 46 looks like 194.3 149.6 87.2 for orange_yellow
+    RGB percent 86.7 91.8 189.6
+RGB 56 61 150 looks like 49.1 64.3 158.2 for blue
+    RGB percent 87.7 105.3 105.4
+RGB 70 148 73 looks like 62.1 134.2 75.1 for green
+    RGB percent 88.7 90.7 102.9
+RGB 175 54 60 looks like 166.2 50.1 59.4 for red
+    RGB percent 95.0 92.7 99.0
+RGB 231 199 31 looks like 188.4 169.2 74.2 for yellow
+    RGB percent 81.6 85.0 239.4
+RGB 187 86 149 looks like 188.0 91.3 144.4 for magenta
+    RGB percent 100.5 106.1 96.9
+RGB 8 133 161 looks like 86.5 150.7 188.6 for cyan
+    RGB percent 1081.4 113.3 117.1
+RGB 243 243 243 looks like 188.0 183.9 187.3 for white
+    RGB percent 77.4 75.7 77.1
+RGB 200 200 200 looks like 165.9 162.6 167.9 for neutral_8
+    RGB percent 82.9 81.3 84.0
+RGB 160 160 160 looks like 139.7 135.7 141.6 for neutral_6_5
+    RGB percent 87.3 84.8 88.5
+RGB 122 122 122 looks like 103.7 99.8 105.6 for neutral_5
+    RGB percent 85.0 81.8 86.6
+RGB 85 85 82 looks like 68.5 67.6 70.9 for neutral_3_5
+    RGB percent 80.6 79.5 86.4
+RGB 52 52 52 looks like 38.2 37.8 37.3 for black
+    RGB percent 73.4 72.8 71.8
+
+Overall:
+RED 95.32 %
+GREEN 92.97 %
+BLUE 103.54 %
+
+
+------------------------------------------------------------------
+Running in CPU mode...
+---------------------------------------------------------------
+
+jklemme@lnx-jklemme:~/src/projects/stream_analysis/image_analysis$ ./image-analysis-gpu -i input_bmp/X-Rite-Photo.bmp -o output.bmp -m
+
+Set up...0.430416 s
+0.430441 s
+
+Converting memory on CPU...0.065074 s
+
+Finding boxes on CPU...0.043468 s
+
+ Row len (columns) 6, Column len (rows) 4
+
+Sorting/placing boxes...0.000003 s
+
+Calculating correctness and printing colors on CPU...0.003037 s
+
+RGB 115 82 68 looks like 111.0 74.0 66.0 for dark_skin
+    RGB percent 96.5 90.2 97.1
+RGB 194 150 130 looks like 186.0 148.0 146.0 for light_skin
+    RGB percent 95.9 98.7 112.3
+RGB 98 122 157 looks like 119.0 132.0 171.0 for blue_sky
+    RGB percent 121.4 108.2 108.9
+RGB 87 108 67 looks like 93.0 109.0 74.0 for foliage
+    RGB percent 106.9 100.9 110.4
+RGB 133 128 177 looks like 149.0 138.0 182.0 for blue_flower
+    RGB percent 112.0 107.8 102.8
+RGB 103 189 170 looks like 129.0 188.0 186.0 for bluish_green
+    RGB percent 125.2 99.5 109.4
+RGB 214 126 44 looks like 184.0 107.0 62.0 for orange
+    RGB percent 86.0 84.9 140.9
+RGB 80 91 166 looks like 85.0 94.0 182.0 for purplish_blue
+    RGB percent 106.2 103.3 109.6
+RGB 193 90 99 looks like 190.0 97.0 112.0 for moderate_red
+    RGB percent 98.4 107.8 113.1
+RGB 94 60 108 looks like 89.0 59.0 97.0 for purple
+    RGB percent 94.7 98.3 89.8
+RGB 157 188 64 looks like 147.0 178.0 93.0 for yellow_green
+    RGB percent 93.6 94.7 145.3
+RGB 224 163 46 looks like 194.0 149.0 87.0 for orange_yellow
+    RGB percent 86.6 91.4 189.1
+RGB 56 61 150 looks like 49.0 64.0 158.0 for blue
+    RGB percent 87.5 104.9 105.3
+RGB 70 148 73 looks like 62.0 134.0 75.0 for green
+    RGB percent 88.6 90.5 102.7
+RGB 175 54 60 looks like 166.0 50.0 59.0 for red
+    RGB percent 94.9 92.6 98.3
+RGB 231 199 31 looks like 188.0 169.0 74.0 for yellow
+    RGB percent 81.4 84.9 238.7
+RGB 187 86 149 looks like 188.0 91.0 144.0 for magenta
+    RGB percent 100.5 105.8 96.6
+RGB 8 133 161 looks like 87.0 152.0 190.0 for cyan
+    RGB percent 1087.5 114.3 118.0
+RGB 243 243 243 looks like 188.0 185.0 188.0 for white
+    RGB percent 77.4 76.1 77.4
+RGB 200 200 200 looks like 166.0 163.0 168.0 for neutral_8
+    RGB percent 83.0 81.5 84.0
+RGB 160 160 160 looks like 140.0 136.0 142.0 for neutral_6_5
+    RGB percent 87.5 85.0 88.8
+RGB 122 122 122 looks like 104.0 100.0 106.0 for neutral_5
+    RGB percent 85.2 82.0 86.9
+RGB 85 85 82 looks like 68.0 67.0 70.0 for neutral_3_5
+    RGB percent 80.0 78.8 85.4
+RGB 52 52 52 looks like 39.0 38.0 38.0 for black
+    RGB percent 75.0 73.1 73.1
+
+Overall:
+RED 95.12 %
+GREEN 92.83 %
+BLUE 103.27 %
+
+Exporting image...0.259087 s
+-----------------------------------------------------------------------------------------------------
+
+
+WITHOUT SHARED TILING IN THE VOTES
+
+jklemme@lnx-jklemme:~/src/projects/stream_analysis/image_analysis$ ./image-analysis-gpu -i input_bmp/X-Rite-Photo.bmp -o output.bmp
+
+Set up...0.425935 s
+0.425956 s
+
+Copying memory to GPU...0.098182 s
+
+Running GPU conversion method...0.000520 s
+
+Running GPU boxing method...0.016035 s
+
+ Copying votes back to host...0.000029 s
+
+ Determining boxes with CPU...0.000148 s
+
+ Loading GPU color values into host...0.000009 s
+
+ Row len (columns) 6, Column len (rows) 4
+
+Sorting/placing boxes...0.000002 s
+
+Launching correctness calculations on GPU...0.000089 s
+
+Copying data from device to host...0.001077 s
+
+RGB 115 82 68 looks like 111.6 74.2 66.5 for dark_skin
+    RGB percent 97.1 90.5 97.8
+RGB 194 150 130 looks like 186.2 148.7 146.1 for light_skin
+    RGB percent 96.0 99.1 112.4
+RGB 98 122 157 looks like 119.7 132.9 171.7 for blue_sky
+    RGB percent 122.1 108.9 109.4
+RGB 87 108 67 looks like 93.8 109.5 74.1 for foliage
+    RGB percent 107.8 101.4 110.6
+RGB 133 128 177 looks like 148.9 138.1 182.5 for blue_flower
+    RGB percent 111.9 107.9 103.1
+RGB 103 189 170 looks like 129.6 188.7 186.1 for bluish_green
+    RGB percent 125.8 99.9 109.5
+RGB 214 126 44 looks like 184.3 107.8 62.6 for orange
+    RGB percent 86.1 85.5 142.2
+RGB 80 91 166 looks like 85.2 94.1 182.2 for purplish_blue
+    RGB percent 106.4 103.4 109.8
+RGB 193 90 99 looks like 190.1 97.4 112.7 for moderate_red
+    RGB percent 98.5 108.2 113.8
+RGB 94 60 108 looks like 92.6 59.4 101.3 for purple
+    RGB percent 98.5 99.0 93.8
+RGB 157 188 64 looks like 147.2 178.7 93.7 for yellow_green
+    RGB percent 93.8 95.0 146.4
+RGB 224 163 46 looks like 194.3 149.6 87.2 for orange_yellow
+    RGB percent 86.7 91.8 189.6
+RGB 56 61 150 looks like 49.1 64.3 158.2 for blue
+    RGB percent 87.7 105.3 105.4
+RGB 70 148 73 looks like 62.1 134.2 75.1 for green
+    RGB percent 88.7 90.7 102.9
+RGB 175 54 60 looks like 166.2 50.1 59.4 for red
+    RGB percent 95.0 92.7 99.0
+RGB 231 199 31 looks like 188.4 169.2 74.2 for yellow
+    RGB percent 81.6 85.0 239.4
+RGB 187 86 149 looks like 188.0 91.3 144.4 for magenta
+    RGB percent 100.5 106.1 96.9
+RGB 8 133 161 looks like 86.5 150.7 188.6 for cyan
+    RGB percent 1081.4 113.3 117.1
+RGB 243 243 243 looks like 188.0 183.9 187.3 for white
+    RGB percent 77.4 75.7 77.1
+RGB 200 200 200 looks like 165.9 162.6 167.9 for neutral_8
+    RGB percent 82.9 81.3 84.0
+RGB 160 160 160 looks like 139.7 135.7 141.6 for neutral_6_5
+    RGB percent 87.3 84.8 88.5
+RGB 122 122 122 looks like 103.7 99.8 105.6 for neutral_5
+    RGB percent 85.0 81.8 86.6
+RGB 85 85 82 looks like 68.5 67.6 70.9 for neutral_3_5
+    RGB percent 80.6 79.5 86.4
+RGB 52 52 52 looks like 38.2 37.8 37.3 for black
+    RGB percent 73.4 72.8 71.8
+
+Overall:
+RED 95.32 %
+GREEN 92.97 %
+BLUE 103.54 %
+
+Exporting image...0.270599 s
+
+
+----------------------------------------------------------------------------------------------------
+
+WITH SHARED TILING
+
+jklemme@lnx-jklemme:~/src/projects/stream_analysis/image_analysis$ ./image-analysis-gpu -i input_bmp/X-Rite-Photo.bmp -o output.bmp
+
+Set up...0.422851 s
+0.422891 s
+
+Copying memory to GPU...0.099042 s
+
+Running GPU conversion method...0.000509 s
+
+Running GPU boxing method...0.015679 s
+
+ Copying votes back to host...0.000064 s
+
+ Determining boxes with CPU...0.000163 s
+
+ Loading GPU color values into host...0.000056 s
+
+ Row len (columns) 6, Column len (rows) 4
+
+Sorting/placing boxes...0.000002 s
+
+Launching correctness calculations on GPU...0.000097 s
+
+Copying data from device to host...0.001214 s
+
+RGB 115 82 68 looks like 111.6 74.2 66.5 for dark_skin
+    RGB percent 97.1 90.5 97.8
+RGB 194 150 130 looks like 186.2 148.7 146.1 for light_skin
+    RGB percent 96.0 99.1 112.4
+RGB 98 122 157 looks like 119.7 132.9 171.7 for blue_sky
+    RGB percent 122.1 108.9 109.4
+RGB 87 108 67 looks like 93.8 109.5 74.1 for foliage
+    RGB percent 107.8 101.4 110.6
+RGB 133 128 177 looks like 148.9 138.1 182.5 for blue_flower
+    RGB percent 111.9 107.9 103.1
+RGB 103 189 170 looks like 129.6 188.7 186.1 for bluish_green
+    RGB percent 125.8 99.9 109.5
+RGB 214 126 44 looks like 184.3 107.8 62.6 for orange
+    RGB percent 86.1 85.5 142.2
+RGB 80 91 166 looks like 85.2 94.1 182.2 for purplish_blue
+    RGB percent 106.4 103.4 109.8
+RGB 193 90 99 looks like 190.1 97.4 112.7 for moderate_red
+    RGB percent 98.5 108.2 113.8
+RGB 94 60 108 looks like 92.2 59.3 100.8 for purple
+    RGB percent 98.1 98.9 93.3
+RGB 157 188 64 looks like 147.2 178.7 93.7 for yellow_green
+    RGB percent 93.8 95.0 146.4
+RGB 224 163 46 looks like 194.3 149.6 87.2 for orange_yellow
+    RGB percent 86.7 91.8 189.6
+RGB 56 61 150 looks like 49.1 64.3 158.2 for blue
+    RGB percent 87.7 105.3 105.4
+RGB 70 148 73 looks like 62.1 134.2 75.1 for green
+    RGB percent 88.7 90.7 102.9
+RGB 175 54 60 looks like 166.2 50.1 59.4 for red
+    RGB percent 95.0 92.7 99.0
+RGB 231 199 31 looks like 188.4 169.2 74.2 for yellow
+    RGB percent 81.6 85.0 239.4
+RGB 187 86 149 looks like 188.0 91.3 144.4 for magenta
+    RGB percent 100.5 106.1 96.9
+RGB 8 133 161 looks like 86.3 150.6 188.3 for cyan
+    RGB percent 1078.7 113.2 117.0
+RGB 243 243 243 looks like 188.0 183.9 187.3 for white
+    RGB percent 77.4 75.7 77.1
+RGB 200 200 200 looks like 165.9 162.6 167.9 for neutral_8
+    RGB percent 82.9 81.3 84.0
+RGB 160 160 160 looks like 139.7 135.7 141.6 for neutral_6_5
+    RGB percent 87.3 84.8 88.5
+RGB 122 122 122 looks like 103.7 99.8 105.6 for neutral_5
+    RGB percent 85.0 81.8 86.6
+RGB 85 85 82 looks like 68.5 67.6 70.9 for neutral_3_5
+    RGB percent 80.6 79.5 86.4
+RGB 52 52 52 looks like 38.2 37.8 37.3 for black
+    RGB percent 73.4 72.8 71.8
+
+Overall:
+RED 95.30 %
+GREEN 92.96 %
+BLUE 103.51 %
+
+Exporting image...0.281520 s
+
+
+----------------------------------------------
+
+
+SPLIT BY KERNEL:
+
+WITH TILING
+
+jklemme@lnx-jklemme:~/src/projects/stream_analysis/image_analysis$ ./image-analysis-gpu -i input_bmp/X-Rite-Photo.bmp -o output.bmp
+
+Set up...0.422578 s
+0.422600 s
+
+Copying memory to GPU...0.100114 s
+
+Running GPU conversion method...0.000516 s
+
+Running GPU boxing methods...
+
+Scanning Vertical...0.004977 s
+
+Scanning horizontal...0.010969 s
+
+Voting for tiles...0.000078 s
+
+Vote smoothing...0.000028 s
+
+ Copying votes back to host...0.000076 s
+
+ Determining boxes with CPU...0.000152 s
+
+ Loading GPU color values into host...0.000010 s
+
+ Row len (columns) 6, Column len (rows) 4
+
+Sorting/placing boxes...0.000018 s
+
+Launching correctness calculations on GPU...0.000116 s
+
+Copying data from device to host...0.001094 s
+
+RGB 115 82 68 looks like 111.6 74.2 66.5 for dark_skin
+    RGB percent 97.1 90.5 97.8
+RGB 194 150 130 looks like 186.2 148.7 146.1 for light_skin
+    RGB percent 96.0 99.1 112.4
+RGB 98 122 157 looks like 119.7 132.9 171.7 for blue_sky
+    RGB percent 122.1 108.9 109.4
+RGB 87 108 67 looks like 93.8 109.5 74.1 for foliage
+    RGB percent 107.8 101.4 110.6
+RGB 133 128 177 looks like 148.9 138.1 182.5 for blue_flower
+    RGB percent 111.9 107.9 103.1
+RGB 103 189 170 looks like 129.6 188.7 186.1 for bluish_green
+    RGB percent 125.8 99.9 109.5
+RGB 214 126 44 looks like 184.3 107.8 62.6 for orange
+    RGB percent 86.1 85.5 142.2
+RGB 80 91 166 looks like 85.2 94.1 182.2 for purplish_blue
+    RGB percent 106.4 103.4 109.8
+RGB 193 90 99 looks like 190.1 97.4 112.7 for moderate_red
+    RGB percent 98.5 108.2 113.8
+RGB 94 60 108 looks like 92.2 59.3 100.8 for purple
+    RGB percent 98.1 98.9 93.3
+RGB 157 188 64 looks like 147.2 178.7 93.7 for yellow_green
+    RGB percent 93.8 95.0 146.4
+RGB 224 163 46 looks like 194.3 149.6 87.2 for orange_yellow
+    RGB percent 86.7 91.8 189.6
+RGB 56 61 150 looks like 49.1 64.3 158.2 for blue
+    RGB percent 87.7 105.3 105.4
+RGB 70 148 73 looks like 62.1 134.2 75.1 for green
+    RGB percent 88.7 90.7 102.9
+RGB 175 54 60 looks like 166.2 50.1 59.4 for red
+    RGB percent 95.0 92.7 99.0
+RGB 231 199 31 looks like 188.4 169.2 74.2 for yellow
+    RGB percent 81.6 85.0 239.4
+RGB 187 86 149 looks like 188.0 91.3 144.4 for magenta
+    RGB percent 100.5 106.1 96.9
+RGB 8 133 161 looks like 86.3 150.6 188.3 for cyan
+    RGB percent 1078.7 113.2 117.0
+RGB 243 243 243 looks like 188.0 183.9 187.3 for white
+    RGB percent 77.4 75.7 77.1
+RGB 200 200 200 looks like 165.9 162.6 167.9 for neutral_8
+    RGB percent 82.9 81.3 84.0
+RGB 160 160 160 looks like 139.7 135.7 141.6 for neutral_6_5
+    RGB percent 87.3 84.8 88.5
+RGB 122 122 122 looks like 103.7 99.8 105.6 for neutral_5
+    RGB percent 85.0 81.8 86.6
+RGB 85 85 82 looks like 68.5 67.6 70.9 for neutral_3_5
+    RGB percent 80.6 79.5 86.4
+RGB 52 52 52 looks like 38.2 37.8 37.3 for black
+    RGB percent 73.4 72.8 71.8
+
+Overall:
+RED 95.30 %
+GREEN 92.96 %
+BLUE 103.51 %
+
+Exporting image...0.270815 s
+
+
+WITHOUT TILING Voting for tiles...0.000142 s
+
+------------------------------
+
+
+--> from 0.016035 s to 0.015679 s.
+--> kernel went fom 0.000078 s to 0.000028 s --> 2.78x Speedup!
+
+NONTP Kernel --> Scanning horizontal...0.009676 s
+TP KERNEL --> 0.010877 s
+
+
+??????
+
+TILE SIZE!
+
+#define HORIZONTAL_TILE_SIZE 30
+#define VERTICAL_TILE_SIZE 24
+
+Scanning Vertical...0.004983 s
+Scanning horizontal...0.011247 s
+
+
+#define HORIZONTAL_TILE_SIZE 64
+#define VERTICAL_TILE_SIZE 64
+
+Scanning Vertical...0.005385 s
+Scanning horizontal...0.011327 s
+
+NOPE!
+
+--------
+
+SHARED MEMORY TILING (PER LINE)
+
+Scanning Vertical...0.004983 s
+Scanning horizontal...0.011247 s
+
+Scanning Vertical...0.002030 s
+Scanning horizontal...0.003118 s
+
+Vertical speedup   -> 2.45x
+Horizontal speedup -> 3.61x
+
+Overall speedup    -> 3.15x
+
+--------------------
+
+End:
+
+Set up...0.412179 s
+0.412224 s
+
+Copying memory to GPU...0.114907 s
+
+Running GPU conversion method...0.000516 s
+
+Running GPU boxing methods...
+
+Scanning Vertical...0.002030 s
+
+Scanning horizontal...0.003118 s
+
+Voting for tiles...0.000141 s
+
+Vote smoothing...0.000098 s
+
+ Copying votes back to host...0.000099 s
+
+ Determining boxes with CPU...0.000177 s
+
+ Loading GPU color values into host...0.000060 s
+
+ Row len (columns) 6, Column len (rows) 4
+
+Sorting/placing boxes...0.000015 s
+
+Launching correctness calculations on GPU...0.000126 s
+
+Copying data from device to host...0.001206 s
+
+RGB 115 82 68 looks like 111.6 74.2 66.5 for dark_skin
+    RGB percent 97.1 90.5 97.8
+RGB 194 150 130 looks like 186.2 148.7 146.1 for light_skin
+    RGB percent 96.0 99.1 112.4
+RGB 98 122 157 looks like 119.7 132.9 171.7 for blue_sky
+    RGB percent 122.1 108.9 109.4
+RGB 87 108 67 looks like 93.8 109.5 74.1 for foliage
+    RGB percent 107.8 101.4 110.6
+RGB 133 128 177 looks like 148.9 138.1 182.5 for blue_flower
+    RGB percent 111.9 107.9 103.1
+RGB 103 189 170 looks like 129.6 188.7 186.1 for bluish_green
+    RGB percent 125.8 99.9 109.5
+RGB 214 126 44 looks like 184.3 107.8 62.6 for orange
+    RGB percent 86.1 85.5 142.2
+RGB 80 91 166 looks like 85.2 94.1 182.2 for purplish_blue
+    RGB percent 106.4 103.4 109.8
+RGB 193 90 99 looks like 190.1 97.4 112.7 for moderate_red
+    RGB percent 98.5 108.2 113.8
+RGB 94 60 108 looks like 92.2 59.3 100.8 for purple
+    RGB percent 98.1 98.9 93.3
+RGB 157 188 64 looks like 147.2 178.7 93.7 for yellow_green
+    RGB percent 93.8 95.0 146.4
+RGB 224 163 46 looks like 194.3 149.6 87.2 for orange_yellow
+    RGB percent 86.7 91.8 189.6
+RGB 56 61 150 looks like 49.1 64.3 158.2 for blue
+    RGB percent 87.7 105.3 105.4
+RGB 70 148 73 looks like 62.1 134.2 75.1 for green
+    RGB percent 88.7 90.7 102.9
+RGB 175 54 60 looks like 166.2 50.1 59.4 for red
+    RGB percent 95.0 92.7 99.0
+RGB 231 199 31 looks like 188.4 169.2 74.2 for yellow
+    RGB percent 81.6 85.0 239.4
+RGB 187 86 149 looks like 188.0 91.3 144.4 for magenta
+    RGB percent 100.5 106.1 96.9
+RGB 8 133 161 looks like 86.3 150.6 188.3 for cyan
+    RGB percent 1078.7 113.2 117.0
+RGB 243 243 243 looks like 188.0 183.9 187.3 for white
+    RGB percent 77.4 75.7 77.1
+RGB 200 200 200 looks like 165.9 162.6 167.9 for neutral_8
+    RGB percent 82.9 81.3 84.0
+RGB 160 160 160 looks like 139.7 135.7 141.6 for neutral_6_5
+    RGB percent 87.3 84.8 88.5
+RGB 122 122 122 looks like 103.7 99.8 105.6 for neutral_5
+    RGB percent 85.0 81.8 86.6
+RGB 85 85 82 looks like 68.5 67.6 70.9 for neutral_3_5
+    RGB percent 80.6 79.5 86.4
+RGB 52 52 52 looks like 38.2 37.8 37.3 for black
+    RGB percent 73.4 72.8 71.8
+
+Overall:
+RED 95.30 %
+GREEN 92.96 %
+BLUE 103.51 %
+
+Exporting image...0.270538 s

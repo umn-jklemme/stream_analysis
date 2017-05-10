@@ -1,0 +1,10 @@
+#ifndef IMAGE_CONVERTER_H
+#define IMAGE_CONVERTER_H
+
+#define RED_MASK 0x00FF0000
+#define GREEN_MASK 0x0000FF00
+#define BLUE_MASK 0x000000FF
+
+
+
+#endif  /* IMAGE_CONVERTER_H */
